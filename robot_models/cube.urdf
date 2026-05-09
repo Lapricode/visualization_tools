@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="cube_robot">
+  <link name="cube">
+    <visual>
+      <geometry>
+        <box size="1 1 1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="green_transparent">
+        <color rgba="0 1 0 0.5"/>
+      </material>
+    </visual>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.1" ixy="0.0" ixz="0.0"
+               iyy="0.1" iyz="0.0"
+               izz="0.1"/>
+    </inertial>
+  </link>
+</robot>
