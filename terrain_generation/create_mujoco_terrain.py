@@ -151,6 +151,7 @@ def build_terrain_files(output_dir: str | Path):
     x_min, x_max = -10.0, 10.0
     y_min, y_max = -10.0, 10.0
     z_height_max = 1.0
+    base_height = 0.1
 
     x = np.linspace(x_min, x_max, nx)
     y = np.linspace(y_min, y_max, ny)
@@ -179,7 +180,7 @@ def build_terrain_files(output_dir: str | Path):
         x_center = (x_min + x_max) / 2,
         y_center = (y_min + y_max) / 2,
         z_scale = z_height_max,
-        base_height = 0.001,
+        base_height = base_height,
         friction = (1.0, 0.1, 0.1),
         rgba = (0.5, 0.5, 1.0, 1.0),
     )

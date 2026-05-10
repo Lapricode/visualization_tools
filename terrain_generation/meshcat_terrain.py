@@ -253,7 +253,7 @@ if __name__ == "__main__":
         y_min=-10.0,
         y_max=10.0,
         grid_res=100,
-        z_scale=0.1,
+        z_scale=1.0,
         base_height=0.1,
         half_1_color=0x8888FF,
         half_2_color=0x444444,
@@ -266,8 +266,11 @@ if __name__ == "__main__":
 
     rng = np.random.default_rng(0)
 
+    # def height_fn(X, Y):
+    #     return rng.random(X.shape) * rng.random(X.shape)
+
     def height_fn(X, Y):
-        return rng.random(X.shape) * rng.random(X.shape)
+        return (X**2 + Y**2) * np.exp(1.0 - (1/9) * (X**2 + Y**2))
 
     viz = terrain_scene(height_fn, params, scene_cfg)
 
