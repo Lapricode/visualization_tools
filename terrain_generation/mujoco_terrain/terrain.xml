@@ -2,55 +2,63 @@
 <mujoco model="terrain_ball">
 
   <compiler angle="radian"/>
-  
-  <option timestep="0.002"
-          gravity="0 0 -9.81"
-          integrator="RK4"/>
+
+  <option
+      timestep="0.001"
+      gravity="0.0 0.0 -9.81"
+      integrator="RK4"/>
 
   <visual>
-    <headlight diffuse="0.8 0.8 0.8"
-               ambient="0.3 0.3 0.3"
-               specular="0.1 0.1 0.1"/>
+    <headlight
+        diffuse="0.3 0.3 0.3"
+        ambient="0.1 0.1 0.1"
+        specular="0.1 0.1 0.1"/>
   </visual>
 
   <asset>
-    <hfield name="terrain"
-            file="terrain.hfield"
-            size="10.0
-                  10.0
-                  1.5
-                  0.2"/>
+    <hfield
+        name="terrain"
+        file="terrain.hfield"
+        size="10.0
+              10.0
+              1.0
+              0.001"/>
   </asset>
 
   <worldbody>
 
-    <!-- Terrain -->
-    <geom name="ground"
-          type="hfield"
-          hfield="terrain"
-          rgba="0.7 0.6 0.5 1.0"
-          friction="1.0 0.1 0.1"/>
+    <geom
+        name="ground"
+        type="hfield"
+        hfield="terrain"
+        pos="0.0 0.0 0"
+        friction="1.0 0.1 0.1"
+        rgba="0.5 0.5 1.0 1.0"/>
 
-    <!-- Ball -->
-    <body name="ball"
-          pos="0.0 0.0 8.0">
+    <body
+        name="ball"
+        pos="0.0 0.0 5.0">
 
       <freejoint/>
 
-      <geom name="ball_geom"
-            type="sphere"
-            size="0.5"
-            density="500.0"
-            rgba="0.1 0.3 1.0 1.0"
-            friction="0.8 0.05 0.05"/>
+      <geom
+          name="ball_geom"
+          type="sphere"
+          size="0.1"
+          density="1.0"
+          friction="1.0 0.1 0.1"
+          rgba="0.5 1.0 0.5 1.0"/>
 
     </body>
 
-    <light pos="0 0 20"/>
+    <light
+        pos="0.0 0.0 20.0"/>
 
-    <camera name="main"
-            pos="0 -18 10"
-            xyaxes="1 0 0 0 0.5 1"/>
+    <camera
+        name="main"
+        pos="0.0 -10.0 10.0"
+        xyaxes="1.0 0.0 0.0
+                0.0 1.0 1.0"/>
 
   </worldbody>
 
