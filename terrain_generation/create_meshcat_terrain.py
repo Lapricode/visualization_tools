@@ -1,23 +1,24 @@
 from __future__ import annotations
-
-import time
 from dataclasses import dataclass
+
+import numpy as np
+import time
 
 import meshcat
 import meshcat.geometry as geom
 import meshcat.transformations as tf
-import numpy as np
 
 
 @dataclass
 class SceneConfig:
-    camera_position: tuple[float, float, float] = (0.0, -10.0, 10.0)
-    light_position: tuple[float, float, float] = (0.0, 0.0, 20.0)
-    show_camera_marker: bool = True
-    show_light_marker: bool = True
-    camera_marker_color: int = 0x0000FF
-    light_marker_color: int = 0xFFFF00
-    marker_radius: float = 0.15
+    use_custom_camera: bool = True
+    camera_position: tuple[float, float, float] = (0.0, -10.0, 6.0)
+    camera_target: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    use_custom_light: bool = True
+    light_position: tuple[float, float, float] = (5.0, -5.0, 10.0)
+    light_target: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    ambient_intensity: float = 0.4
+    directional_intensity: float = 2.0
 
 
 @dataclass
@@ -42,6 +43,8 @@ class TerrainParams:
     reflectivity: float = 0.5
 
     # Normal/tangent arrows
+    draw_frames: bool = True
+    draw_only_normals: bool = False
     arrow_stride: int = 500
     arrow_length: float = 0.3
     arrow_radius: float = 0.01
@@ -63,12 +66,63 @@ class TerrainParams:
         return 0.5 * (self.y_min + self.y_max)
 
 
+def set_camera(viz, cfg: SceneConfig):
+    if not cfg.use_custom_camera:
+        return
+    eye = np.asarray(cfg.camera_position, dtype=float)
+    target = np.asarray(cfg.camera_target, dtype=float)
+    forward = target - eye
+    forward /= (np.linalg.norm(forward) + 1e-12)
+    up = np.array([0.0, 0.0, 1.0])
+    right = np.cross(forward, up)
+    right /= np.linalg.norm(right) + 1e-12
+    true_up = np.cross(right, forward)
+    T = np.eye(4)
+    T[:3, 0] = right
+    T[:3, 1] = true_up
+    T[:3, 2] = -forward
+    T[:3, 3] = eye
+    viz["/Cameras/default"].set_transform(T)
+    viz["/Cameras/default/rotated/<object>"].set_property(
+            "position",
+            list(target),
+        )
+
+def set_lighting(viz, cfg: SceneConfig):
+    if not cfg.use_custom_light:
+        return
+    light_pos = np.asarray(cfg.light_position, dtype=float)
+    target = np.asarray(cfg.light_target, dtype=float)
+    forward = target - light_pos
+    forward /= (np.linalg.norm(forward) + 1e-12)
+    up = np.array([0.0, 0.0, 1.0])
+    right = np.cross(forward, up)
+    if np.linalg.norm(right) < 1e-8:
+        right = np.array([1.0, 0.0, 0.0])
+    right /= np.linalg.norm(right)
+    true_up = np.cross(right, forward)
+    R = np.eye(3)
+    R[:, 0] = right
+    R[:, 1] = true_up
+    R[:, 2] = -forward
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = light_pos
+    viz["/Lights/DirectionalLight"].set_transform(T)
+    viz["/Lights/DirectionalLight/<object>"].set_property(
+        "intensity", cfg.directional_intensity
+    )
+    viz["/Lights/AmbientLight/<object>"].set_property(
+        "intensity", cfg.ambient_intensity
+    )
+
+
 def normalize01(z: np.ndarray) -> np.ndarray:
-    z = np.asarray(z, dtype=np.float32)
+    z = np.asarray(z, dtype=np.float64)
     zmin = float(z.min())
     zmax = float(z.max())
     if np.isclose(zmax, zmin):
-        return np.zeros_like(z, dtype=np.float32)
+        return np.zeros_like(z, dtype=np.float64)
     return (z - zmin) / (zmax - zmin)
 
 
@@ -76,10 +130,8 @@ def make_height_field(params: TerrainParams, height_fn):
     x = np.linspace(params.x_min, params.x_max, params.grid_res)
     y = np.linspace(params.y_min, params.y_max, params.grid_res)
     X, Y = np.meshgrid(x, y, indexing="xy")
-
     Z_raw = height_fn(X, Y)
     Z = params.base_height + params.z_scale * normalize01(Z_raw)
-
     vertices = np.c_[X.ravel(order="C"), Y.ravel(order="C"), Z.ravel(order="C")]
     return x, y, X, Y, Z, vertices
 
@@ -87,24 +139,23 @@ def make_height_field(params: TerrainParams, height_fn):
 def make_faces(nx: int, ny: int):
     faces_set1 = []
     faces_set2 = []
-
     for i in range(nx - 1):
         for j in range(ny - 1):
             idx = j * nx + i
             faces_set1.append([idx, idx + 1, idx + nx])
             faces_set2.append([idx + 1, idx + nx + 1, idx + nx])
-
     return np.asarray(faces_set1, dtype=np.int32), np.asarray(faces_set2, dtype=np.int32)
 
 
 def add_mesh(viz, path: str, vertices: np.ndarray, faces: np.ndarray, color: int, opacity: float, reflectivity: float):
     viz[path].set_object(
         geom.TriangularMeshGeometry(vertices, faces),
-        geom.MeshLambertMaterial(
+        geom.MeshPhongMaterial(
             color=color,
             transparent=True,
             opacity=opacity,
             reflectivity=reflectivity,
+            shininess=80,
         ),
     )
 
@@ -122,19 +173,15 @@ def add_marker(viz, path: str, position: tuple[float, float, float], color: int,
 def face_centroid_and_frame(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray):
     e1 = p2 - p1
     e2 = p3 - p1
-
     centroid = (p1 + p2 + p3) / 3.0
     normal = np.cross(e1, e2)
     normal /= np.linalg.norm(normal) + 1e-7
-
     if abs(e2[1]) > 1e-12:
         xtangent = e1 - (e1[1] / e2[1]) * e2
     else:
-        xtangent = e2 - (e2[1] / (e1[1] + 1e-12)) * e1
-
+        xtangent = e2
     xtangent /= np.linalg.norm(xtangent) + 1e-7
     ytangent = np.cross(normal, xtangent)
-
     rot_final = np.column_stack([xtangent, ytangent, normal])
     return centroid, rot_final, normal
 
@@ -147,8 +194,10 @@ def add_arrow(viz, path: str, color: int, length: float, radius: float, transfor
     viz[path].set_transform(transform)
 
 
-def terrain_scene(height_fn, params: TerrainParams, scene_cfg: SceneConfig):
+def terrain_scene(height_fn, params: TerrainParams, scene: SceneConfig):
     viz = meshcat.visualizer.Visualizer()
+    set_camera(viz, scene)
+    set_lighting(viz, scene)
 
     x, y, X, Y, Z, vertices = make_height_field(params, height_fn)
     nx, ny = len(x), len(y)
@@ -173,78 +222,68 @@ def terrain_scene(height_fn, params: TerrainParams, scene_cfg: SceneConfig):
         params.reflectivity,
     )
 
-    if scene_cfg.show_light_marker:
-        add_marker(
-            viz,
-            "scene/light",
-            scene_cfg.light_position,
-            scene_cfg.light_marker_color,
-            scene_cfg.marker_radius,
-        )
+    if params.draw_frames:
+        all_faces = np.vstack([faces_set1, faces_set2])
+        for k, (i1, i2, i3) in enumerate(all_faces):
+            if k % params.arrow_stride != 0:
+                continue
 
-    if scene_cfg.show_camera_marker:
-        add_marker(
-            viz,
-            "scene/camera",
-            scene_cfg.camera_position,
-            scene_cfg.camera_marker_color,
-            scene_cfg.marker_radius,
-        )
+            p1, p2, p3 = vertices[i1], vertices[i2], vertices[i3]
+            centroid, rot_final, normal = face_centroid_and_frame(p1, p2, p3)
 
-    all_faces = np.vstack([faces_set1, faces_set2])
-    for k, (i1, i2, i3) in enumerate(all_faces):
-        if k % params.arrow_stride != 0:
-            continue
+            T = np.eye(4)
+            T[:3, :3] = rot_final
+            T[:3, 3] = centroid
 
-        p1, p2, p3 = vertices[i1], vertices[i2], vertices[i3]
-        centroid, rot_final, normal = face_centroid_and_frame(p1, p2, p3)
+            transform_x = (
+                tf.translation_matrix([params.arrow_length / 2.0, 0.0, 0.0])
+                @ tf.rotation_matrix(-np.pi / 2, [0.0, 0.0, 1.0])
+            )
+            transform_y = tf.translation_matrix([0.0, params.arrow_length / 2.0, 0.0])
+            transform_z = (
+                tf.translation_matrix([0.0, 0.0, params.arrow_length / 2.0])
+                @ tf.rotation_matrix(np.pi / 2, [1.0, 0.0, 0.0])
+            )
 
-        T = np.eye(4)
-        T[:3, :3] = rot_final
-        T[:3, 3] = centroid
-
-        transform_x = (
-            tf.translation_matrix([params.arrow_length / 2.0, 0.0, 0.0])
-            @ tf.rotation_matrix(-np.pi / 2, [0.0, 0.0, 1.0])
-        )
-        transform_y = tf.translation_matrix([0.0, params.arrow_length / 2.0, 0.0])
-        transform_z = (
-            tf.translation_matrix([0.0, 0.0, params.arrow_length / 2.0])
-            @ tf.rotation_matrix(np.pi / 2, [1.0, 0.0, 0.0])
-        )
-
-        add_arrow(
-            viz,
-            f"xtangents/arrow_{k}",
-            0xff0000,
-            params.arrow_length,
-            params.arrow_radius,
-            T @ transform_x,
-        )
-        add_arrow(
-            viz,
-            f"ytangents/arrow_{k}",
-            0x00ff00,
-            params.arrow_length,
-            params.arrow_radius,
-            T @ transform_y,
-        )
-        add_arrow(
-            viz,
-            f"normals/arrow_{k}",
-            0x0000ff,
-            params.arrow_length,
-            params.arrow_radius,
-            T @ transform_z,
-        )
+            add_arrow(
+                viz,
+                f"normals/arrow_{k}",
+                0x0000ff,
+                params.arrow_length,
+                params.arrow_radius,
+                T @ transform_z,
+            )
+            if not params.draw_only_normals:
+                add_arrow(
+                    viz,
+                    f"xtangents/arrow_{k}",
+                    0xff0000,
+                    params.arrow_length,
+                    params.arrow_radius,
+                    T @ transform_x,
+                )
+                add_arrow(
+                    viz,
+                    f"ytangents/arrow_{k}",
+                    0x00ff00,
+                    params.arrow_length,
+                    params.arrow_radius,
+                    T @ transform_y,
+                )
 
     return viz
 
 
 if __name__ == "__main__":
-    scene_cfg = SceneConfig(
-        camera_position=(0.0, -10.0, 10.0),
-        light_position=(0.0, 0.0, 20.0),
+    scene = SceneConfig(
+        use_custom_camera=True,
+        camera_position=(0.0, -5.0, 5.0),
+        camera_target=(0.0, 0.0, 0.0),
+        use_custom_light=True,
+        light_position=(0.0, 0.0, 10.0),
+        light_target=(0.0, 0.0, 0.0),
+        ambient_intensity=1.0,
+        directional_intensity=0.0,
     )
 
     params = TerrainParams(
@@ -255,11 +294,13 @@ if __name__ == "__main__":
         grid_res=100,
         z_scale=1.0,
         base_height=0.1,
-        half_1_color=0x8888FF,
-        half_2_color=0x444444,
-        opacity=0.8,
-        reflectivity=0.3,
-        arrow_stride=500,
+        half_1_color=0x7777FF,
+        half_2_color=0x77FF77,
+        opacity=1.0,
+        reflectivity=1.0,
+        draw_frames=False,
+        draw_only_normals=True,
+        arrow_stride=100,
         arrow_length=0.3,
         arrow_radius=0.01,
     )
@@ -272,7 +313,7 @@ if __name__ == "__main__":
     def height_fn(X, Y):
         return (X**2 + Y**2) * np.exp(1.0 - (1/9) * (X**2 + Y**2))
 
-    viz = terrain_scene(height_fn, params, scene_cfg)
+    viz = terrain_scene(height_fn, params, scene)
 
     print("Keep this process running. Press Ctrl+C to exit.")
     try:
