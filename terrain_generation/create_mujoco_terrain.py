@@ -1,8 +1,10 @@
 from __future__ import annotations
 from dataclasses import dataclass
+
 from pathlib import Path
 import struct
 import numpy as np
+
 import mujoco
 import mujoco.viewer
 
@@ -150,14 +152,15 @@ def build_terrain_files(output_dir: str | Path):
     nx, ny = resolution, resolution
     x_min, x_max = -10.0, 10.0
     y_min, y_max = -10.0, 10.0
-    z_height_max = 1.0
     base_height = 0.1
+    z_scale = 1.0
 
     x = np.linspace(x_min, x_max, nx)
     y = np.linspace(y_min, y_max, ny)
     X, Y = np.meshgrid(x, y, indexing = "xy")
 
     Z = (X**2 + Y**2) * np.exp(1.0 - (1/9) * (X**2 + Y**2))
+    # Z = (X**2 + Y**2) * np.sin(X) * np.sin(Y) * np.exp(1.0 - (X**2 + Y**2))
     # Z = np.floor(X)
     # Z = np.random.rand(*X.shape) * np.random.rand(*Y.shape)
     Z_norm = normalize01(Z)
@@ -179,14 +182,14 @@ def build_terrain_files(output_dir: str | Path):
         y_radius = (y_max - y_min) / 2,
         x_center = (x_min + x_max) / 2,
         y_center = (y_min + y_max) / 2,
-        z_scale = z_height_max,
+        z_scale = z_scale,
         base_height = base_height,
         friction = (1.0, 0.1, 0.1),
         rgba = (0.5, 0.5, 1.0, 1.0),
     )
 
     ball_cfg = BallConfig(
-        start_pos = (0.0, 0.0, 5.0),
+        start_pos = (0.0, 0.0, 10.0),
         radius = 0.1,
         density = 1.0,
         friction = (1.0, 0.1, 0.1),

@@ -276,7 +276,7 @@ def terrain_scene(height_fn, params: TerrainParams, scene: SceneConfig):
 
 if __name__ == "__main__":
     scene = SceneConfig(
-        use_custom_camera=True,
+        use_custom_camera=False,
         camera_position=(0.0, -5.0, 5.0),
         camera_target=(0.0, 0.0, 0.0),
         use_custom_light=True,
@@ -298,7 +298,7 @@ if __name__ == "__main__":
         half_2_color=0x77FF77,
         opacity=1.0,
         reflectivity=1.0,
-        draw_frames=False,
+        draw_frames=True,
         draw_only_normals=True,
         arrow_stride=100,
         arrow_length=0.3,
@@ -312,6 +312,9 @@ if __name__ == "__main__":
 
     def height_fn(X, Y):
         return (X**2 + Y**2) * np.exp(1.0 - (1/9) * (X**2 + Y**2))
+
+    # def height_fn(X, Y):
+    #     return (X**2 + Y**2) * np.sin(X) * np.sin(Y) * np.exp(1.0 - (X**2 + Y**2))
 
     viz = terrain_scene(height_fn, params, scene)
 
