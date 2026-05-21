@@ -1,10 +1,9 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
 import time
-
 import numpy as np
 from skimage import measure
+import trimesh
 import viser
 
 
@@ -83,23 +82,6 @@ def set_lighting(server: viser.ViserServer, cfg: SceneConfig) -> None:
     )
 
 
-def sphere_field(X: np.ndarray, Y: np.ndarray, Z: np.ndarray, radius: float = 1.0) -> np.ndarray:
-    return X**2 + Y**2 + Z**2 - radius**2
-
-
-def torus_field(X: np.ndarray, Y: np.ndarray, Z: np.ndarray, R: float = 0.9, r: float = 0.3) -> np.ndarray:
-    q = np.sqrt(X**2 + Y**2) - R
-    return q**2 + Z**2 - r**2
-
-
-def gyroid_field(X: np.ndarray, Y: np.ndarray, Z: np.ndarray) -> np.ndarray:
-    return (
-        np.sin(X) * np.cos(Y)
-        + np.sin(Y) * np.cos(Z)
-        + np.sin(Z) * np.cos(X)
-    )
-
-
 def make_implicit_mesh(params: ImplicitSurfaceParams, field_fn):
     xs = np.linspace(params.x_min, params.x_max, params.grid_res)
     ys = np.linspace(params.y_min, params.y_max, params.grid_res)
@@ -114,7 +96,6 @@ def make_implicit_mesh(params: ImplicitSurfaceParams, field_fn):
         spacing=(xs[1] - xs[0], ys[1] - ys[0], zs[1] - zs[0]),
     )
 
-    # marching_cubes returns coordinates relative to the grid origin; shift into world space.
     verts[:, 0] += params.x_min
     verts[:, 1] += params.y_min
     verts[:, 2] += params.z_min
@@ -126,7 +107,10 @@ def implicit_surface_scene(field_fn, params: ImplicitSurfaceParams, scene: Scene
     set_camera(server, scene)
     set_lighting(server, scene)
 
-    verts, faces, _normals = make_implicit_mesh(params, field_fn)
+    verts, faces, normals = make_implicit_mesh(params, field_fn)
+
+    # Keep a trimesh copy for ray intersection tests.
+    mesh = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
 
     server.scene.add_mesh_simple(
         name="/implicit_surface",
@@ -162,20 +146,34 @@ def implicit_surface_scene(field_fn, params: ImplicitSurfaceParams, scene: Scene
             line_width=3.0,
         )
 
-    return server
+    return server, mesh, verts, faces, normals
+
+
+def sphere_field(X: np.ndarray, Y: np.ndarray, Z: np.ndarray, radius: float = 1.0) -> np.ndarray:
+    return X**2 + Y**2 + Z**2 - radius**2
+
+
+def torus_field(X: np.ndarray, Y: np.ndarray, Z: np.ndarray, R: float = 0.9, r: float = 0.3) -> np.ndarray:
+    q = np.sqrt(X**2 + Y**2) - R
+    return q**2 + Z**2 - r**2
+
+
+def gyroid_field(X: np.ndarray, Y: np.ndarray, Z: np.ndarray) -> np.ndarray:
+    return (
+        np.sin(X) * np.cos(Y)
+        + np.sin(Y) * np.cos(Z)
+        + np.sin(Z) * np.cos(X)
+    )
 
 
 if __name__ == "__main__":
-    
     resolution = 100
     x_min, x_max = -2.0, 2.0
     y_min, y_max = -2.0, 2.0
     z_min, z_max = -2.0, 2.0
-    z_scale = 1.0
-    base_height = 0.0
 
     scene = SceneConfig(
-        camera_position=((x_max - x_min)/2, (y_max - y_min)/2, (z_max - z_min)/2),
+        camera_position=((x_max - x_min) / 2, (y_max - y_min) / 2, (z_max - z_min) / 2),
         camera_target=(0.0, 0.0, 0.0),
         ambient_intensity=0.9,
         directional_intensity=2.0,
@@ -196,12 +194,91 @@ if __name__ == "__main__":
         opacity=0.7,
     )
 
-    # Swap this for torus_field or gyroid_field if you want a different implicit surface.
-    field_fn = lambda X, Y, Z: sphere_field(X, Y, Z, radius = 1.0)
-    # field_fn = lambda X, Y, Z: torus_field(X, Y, Z, R = 0.5, r = 0.25)
-    # field_fn = lambda X, Y, Z: gyroid_field(X, Y, Z)
+    field_fn = lambda X, Y, Z: torus_field(X, Y, Z, R=1.0, r=0.5)
 
-    server = implicit_surface_scene(field_fn, params, scene)
+    server, mesh, verts, faces, normals = implicit_surface_scene(field_fn, params, scene)
+
+    # For clicking on the mesh
+    clicked_markers = []
+
+    # Precompute triangles once for ray intersection.
+    triangles = verts[faces]  # shape: (num_faces, 3, 3)
+
+
+    def ray_triangle_intersection(origin: np.ndarray, direction: np.ndarray, triangles: np.ndarray):
+        """
+        Return the closest intersection point of a ray with a triangle mesh,
+        or None if there is no hit.
+
+        origin: (3,)
+        direction: (3,) should be normalized
+        triangles: (M, 3, 3)
+        """
+        eps = 1e-8
+
+        v0 = triangles[:, 0]
+        v1 = triangles[:, 1]
+        v2 = triangles[:, 2]
+
+        edge1 = v1 - v0
+        edge2 = v2 - v0
+
+        h = np.cross(np.broadcast_to(direction, edge2.shape), edge2)
+        a = np.einsum("ij,ij->i", edge1, h)
+
+        mask = np.abs(a) > eps
+        if not np.any(mask):
+            return None
+
+        f = np.zeros_like(a)
+        f[mask] = 1.0 / a[mask]
+
+        s = origin - v0
+        u = f * np.einsum("ij,ij->i", s, h)
+        mask &= (u >= 0.0) & (u <= 1.0)
+
+        if not np.any(mask):
+            return None
+
+        q = np.cross(s, edge1)
+        v = f * np.einsum("ij,j->i", q, direction)
+        mask &= (v >= 0.0) & (u + v <= 1.0)
+
+        if not np.any(mask):
+            return None
+
+        t = f * np.einsum("ij,ij->i", edge2, q)
+        mask &= t > eps
+
+        if not np.any(mask):
+            return None
+
+        t_hit = t[mask].min()
+        hit = origin + t_hit * direction
+        return hit
+
+
+    @server.scene.on_click()
+    def handle_click(event: viser.SceneClickEvent):
+        origin = np.asarray(event.ray_origin, dtype=np.float32)
+        direction = np.asarray(event.ray_direction, dtype=np.float32)
+        direction = direction / np.linalg.norm(direction)
+
+        hit = ray_triangle_intersection(origin, direction, triangles)
+        if hit is None:
+            print("No mesh hit.")
+            return
+
+        print("Clicked point:", hit)
+
+        marker = server.scene.add_icosphere(
+            name=f"/clicked/{time.time()}",
+            radius=0.03,
+            color=(255, 0, 0),
+            position=tuple(float(x) for x in hit),
+            opacity=1.0,
+        )
+        clicked_markers.append(marker)
 
     print(f"Viser running at: http://localhost:{server.get_port()}")
     print("Open the URL above in your browser. Press Ctrl+C to exit.")
