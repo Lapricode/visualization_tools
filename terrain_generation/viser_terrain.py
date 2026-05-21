@@ -41,6 +41,7 @@ class TerrainParams:
     draw_only_normals: bool = True
     arrow_stride: int = 100
     arrow_length: float = 0.3
+    draw_world_axes: bool = True
 
     @property
     def x_radius(self) -> float:
@@ -219,18 +220,46 @@ def terrain_scene(height_fn, params: TerrainParams, scene: SceneConfig):
                 colors=(0, 200, 0),
                 line_width=2.0,
             )
-    
+
+    if params.draw_world_axes:
+        L = max(params.x_max - params.x_min, params.y_max - params.y_min)
+        server.scene.add_line_segments(
+            name="/axes/x",
+            points=np.array([[[0, 0, 0], [L, 0, 0]]], dtype=np.float32),
+            colors=(255, 0, 0),
+            line_width=2.0,
+        )
+        server.scene.add_line_segments(
+            name="/axes/y",
+            points=np.array([[[0, 0, 0], [0, L, 0]]], dtype=np.float32),
+            colors=(0, 255, 0),
+            line_width=2.0,
+        )
+        server.scene.add_line_segments(
+            name="/axes/z",
+            points=np.array([[[0, 0, 0], [0, 0, L]]], dtype=np.float32),
+            colors=(0, 0, 255),
+            line_width=2.0,
+        )
+
     return server
 
 
 if __name__ == "__main__":
+    
+    resolution = 100
+    x_min, x_max = -10.0, 10.0
+    y_min, y_max = -10.0, 10.0
+    z_scale = 1.0
+    base_height = 0.0
+
     scene = SceneConfig(
-        camera_position=(-10.0, 0.0, 7.0),
+        camera_position=((x_max - x_min)/2, (y_max - y_min)/2, 5.0),
         camera_target=(0.0, 0.0, 0.0),
-        # Ambient: dim, warm white — like MuJoCo's headlight_ambient
+        # Ambient light: dim, warm white — like MuJoCo's headlight_ambient
         ambient_color=(0.8, 0.8, 1.0),
         ambient_intensity=1.0,
-        # Directional: strong, from above-left — like MuJoCo's light_pos
+        # Directional light: strong, from above-left — like MuJoCo's light_pos
         directional_color=(1.0, 1.0, 1.0),
         directional_intensity=2.0,
         directional_position=(5.0, -5.0, 10.0),
@@ -239,32 +268,29 @@ if __name__ == "__main__":
     )
 
     params = TerrainParams(
-        x_min=-10.0,
-        x_max=10.0,
-        y_min=-10.0,
-        y_max=10.0,
-        grid_res=100,
-        z_scale=1.0,
-        base_height=0.1,
+        x_min=x_min,
+        x_max=x_max,
+        y_min=y_min,
+        y_max=y_max,
+        grid_res=resolution,
+        z_scale=z_scale,
+        base_height=base_height,
         half_1_color=(0.5, 1.0, 0.5),
         half_2_color=(1.0, 0.5, 0.5),
         opacity=0.7,
-        draw_frames=True,
+        draw_frames=False,
         draw_only_normals=False,
-        arrow_stride=100,
-        arrow_length=0.3,
+        arrow_stride=1,
+        arrow_length=0.05,
+        draw_world_axes=True,
     )
 
     def height_fn(X, Y):
+        # rng = np.random.default_rng(0)
         return (X**2 + Y**2) * np.exp(1.0 - (1 / 9) * (X**2 + Y**2))
-
-    # Alternative height functions:
-    # def height_fn(X, Y):
-    #     return (X**2 + Y**2) * np.sin(X) * np.sin(Y) * np.exp(1.0 - (X**2 + Y**2))
-    #
-    # rng = np.random.default_rng(0)
-    # def height_fn(X, Y):
-    #     return rng.random(X.shape) * rng.random(X.shape)
+        # return rng.random(X.shape) * rng.random(X.shape)
+        # return (X**2 + Y**2) * np.sin(X) * np.sin(Y) * np.exp(1.0 - (X**2 + Y**2))
+        # return np.floor(X)
 
     server = terrain_scene(height_fn, params, scene)
 

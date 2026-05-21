@@ -205,7 +205,7 @@ def build_terrain_files(output_dir: str | Path):
 
 
 if __name__ == "__main__":
-    xml_path, hfield_path = build_terrain_files("mujoco_terrain")
+    xml_path, hfield_path = build_terrain_files("mujoco_terrain_files")
     print("Wrote:", xml_path)
     print("Wrote:", hfield_path)
 

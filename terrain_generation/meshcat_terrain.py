@@ -275,6 +275,13 @@ def terrain_scene(height_fn, params: TerrainParams, scene: SceneConfig):
 
 
 if __name__ == "__main__":
+
+    resolution = 100
+    x_min, x_max = -10.0, 10.0
+    y_min, y_max = -10.0, 10.0
+    z_scale = 1.0
+    base_height = 0.1
+
     scene = SceneConfig(
         use_custom_camera=False,
         camera_position=(0.0, -5.0, 5.0),
@@ -287,13 +294,13 @@ if __name__ == "__main__":
     )
 
     params = TerrainParams(
-        x_min=-10.0,
-        x_max=10.0,
-        y_min=-10.0,
-        y_max=10.0,
-        grid_res=100,
-        z_scale=1.0,
-        base_height=0.1,
+        x_min=x_min,
+        x_max=x_max,
+        y_min=y_min,
+        y_max=y_max,
+        grid_res=resolution,
+        z_scale=z_scale,
+        base_height=base_height,
         half_1_color=0x7777FF,
         half_2_color=0x77FF77,
         opacity=1.0,
